@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*_venv/
+env/
+.pytest_cache/
+.env
+data/*.duckdb
+data/*.duckdb.wal
+data/*.jsonl
+data/*.sqlite
+data/eval_report.json
+.DS_Store

@@ -1,0 +1,265 @@
+{
+  "name": "GridWise: email -> draft -> human approval -> reply",
+  "nodes": [
+    {
+      "parameters": {
+        "mailbox": "INBOX",
+        "postProcessAction": "read",
+        "format": "resolved",
+        "options": {}
+      },
+      "name": "New support email",
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        300
+      ],
+      "id": "new-support-email",
+      "credentials": {
+        "imap": {
+          "id": "REPLACE_ME",
+          "name": "Support mailbox (IMAP)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://gridwise:8000/email/draft",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ subject: $json.subject || '', body: $json.text || '', message_id: $json.messageId || null }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "name": "Draft reply with GridWise",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        300
+      ],
+      "id": "draft-reply-with-gridwise"
+    },
+    {
+      "parameters": {
+        "fromEmail": "gridwise@example.com",
+        "toEmail": "duty-energy-manager@example.com",
+        "subject": "=[GridWise draft {{ $json.draft_id }}]{{ $json.requires_attention ? ' NEEDS ATTENTION:' : '' }} {{ $json.subject }}",
+        "emailFormat": "text",
+        "text": "=A customer email needs a reply. GridWise drafted one; nothing is sent until you decide.\n\nDraft id:    {{ $json.draft_id }}\nConfidence:  {{ $json.confidence }}\nFlags:       {{ $json.flags.join(', ') || 'none' }}{{ $json.requires_attention ? '   <-- NEEDS ATTENTION' : '' }}\nSources:     {{ $json.citations.join(', ') || 'none' }}\n\nQuestion (personal data redacted):\n{{ $json.question }}\n\nDraft reply:\n----------------------------------------------------------------\n{{ $json.draft_reply }}\n----------------------------------------------------------------\n\nApprove and send:  {{ $execution.resumeUrl }}{{ $execution.resumeUrl.includes('?') ? '&' : '?' }}decision=approve&reviewer=duty-energy-manager&token={{ $json.approval_token }}\nReject:            {{ $execution.resumeUrl }}{{ $execution.resumeUrl.includes('?') ? '&' : '?' }}decision=reject&reviewer=duty-energy-manager&token={{ $json.approval_token }}\n\nThese links are personal: anyone holding one can decide on this draft.\n\nIf nobody decides within 48 hours the draft expires and nothing is sent.\nTrace of how this draft was produced: {{ $('Draft reply with GridWise').item.json.run_id }}\n",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Ask reviewer to approve",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        480,
+        300
+      ],
+      "id": "ask-reviewer-to-approve",
+      "credentials": {
+        "smtp": {
+          "id": "REPLACE_ME_SMTP",
+          "name": "Outgoing mail (SMTP)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "httpMethod": "GET",
+        "responseMode": "onReceived",
+        "limitWaitTime": true,
+        "limitType": "afterTimeInterval",
+        "resumeAmount": 48,
+        "resumeUnit": "hours",
+        "options": {}
+      },
+      "name": "Wait for decision",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        720,
+        300
+      ],
+      "id": "wait-for-decision",
+      "webhookId": "gridwise-approval"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://gridwise:8000/drafts/{{ $('Draft reply with GridWise').item.json.draft_id }}/decision",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => { const clicked = $json.headers !== undefined; const q = $json.query || {}; const draft = $('Draft reply with GridWise').item.json; return JSON.stringify(clicked ? { approved: q.decision === 'approve', reviewer: q.reviewer || 'unknown', approval_token: q.token || '' } : { approved: false, reviewer: 'expired-after-48h', approval_token: draft.approval_token, note: 'no decision within 48 hours' }); })() }}",
+        "options": {}
+      },
+      "name": "Record decision in GridWise",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        300
+      ],
+      "id": "record-decision-in-gridwise"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "approved-check",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "approved",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1200,
+        300
+      ],
+      "id": "approved"
+    },
+    {
+      "parameters": {
+        "fromEmail": "support@example.com",
+        "toEmail": "={{ $('New support email').item.json.from.value[0].address }}",
+        "subject": "=Re: {{ $('New support email').item.json.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.final_reply }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Send approved reply",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1440,
+        200
+      ],
+      "id": "send-approved-reply",
+      "credentials": {
+        "smtp": {
+          "id": "REPLACE_ME_SMTP",
+          "name": "Outgoing mail (SMTP)"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "name": "Rejected or expired: send nothing",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1440,
+        420
+      ],
+      "id": "rejected-or-expired-send-nothing"
+    }
+  ],
+  "connections": {
+    "New support email": {
+      "main": [
+        [
+          {
+            "node": "Draft reply with GridWise",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft reply with GridWise": {
+      "main": [
+        [
+          {
+            "node": "Ask reviewer to approve",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask reviewer to approve": {
+      "main": [
+        [
+          {
+            "node": "Wait for decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for decision": {
+      "main": [
+        [
+          {
+            "node": "Record decision in GridWise",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record decision in GridWise": {
+      "main": [
+        [
+          {
+            "node": "Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approved?": {
+      "main": [
+        [
+          {
+            "node": "Send approved reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Rejected or expired: send nothing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "active": false,
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

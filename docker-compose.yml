@@ -1,0 +1,42 @@
+services:
+  gridwise:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # Nothing set -> the deterministic offline stand-in agents.
+      GRIDWISE_PROVIDER: ${GRIDWISE_PROVIDER:-auto}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-}
+      AZURE_OPENAI_EMBEDDING_DEPLOYMENT: ${AZURE_OPENAI_EMBEDDING_DEPLOYMENT:-}
+      GRIDWISE_MAX_STEPS: 5
+      GRIDWISE_MAPE_ALERT: 0.12
+      GRIDWISE_LOG_PROMPTS: "true"
+    volumes:
+      - gridwise-data:/app/data
+
+  # Optional: the email -> draft -> human approval -> reply workflow.
+  #   docker compose --profile email up --build
+  # then import integrations/n8n/email_approval_workflow.json (see integrations/n8n/README.md).
+  n8n:
+    profiles: ["email"]
+    image: n8nio/n8n:2.45.4
+    ports:
+      - "5678:5678"
+    environment:
+      N8N_HOST: localhost
+      WEBHOOK_URL: http://localhost:5678/
+      GENERIC_TIMEZONE: Europe/Amsterdam
+      N8N_DIAGNOSTICS_ENABLED: "false"
+    volumes:
+      - n8n-data:/home/node/.n8n
+      - ./integrations/n8n:/workflows:ro
+    depends_on:
+      - gridwise
+
+volumes:
+  gridwise-data:
+  n8n-data:
